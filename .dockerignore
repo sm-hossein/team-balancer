@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.gitignore
+frontend.log
+frontend.err
+backend.log
+backend.err
+tmp_bmitra
+tmp_bmitra.zip
+backend/data
