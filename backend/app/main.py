@@ -34,7 +34,6 @@ from .schemas import (
     PlayerResponse,
     PlayerUpdateRequest,
     PendingRegistrationResponse,
-    RegistrationResponse,
     SelfProfileUpdateRequest,
     TeamGenerationRequest,
     UserLoginRequest,
@@ -161,7 +160,11 @@ def healthcheck() -> dict[str, str]:
 
 
 @app.post("/api/uploads/player-image")
-async def upload_player_image(file: UploadFile = File(...)) -> dict[str, str]:
+async def upload_player_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(_require_user),
+) -> dict[str, str]:
+    _ = current_user
     bucket_name = os.getenv("PLAYER_IMAGE_BUCKET")
     if not bucket_name:
         raise HTTPException(status_code=503, detail="Image storage is not configured.")
@@ -252,52 +255,6 @@ def create_user_account(
         return AdminUserCreateResponse(
             user=_serialize_user(user),
             player=_serialize_player(player),
-        )
-
-
-@app.post("/api/auth/register", response_model=RegistrationResponse, status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegisterRequest) -> RegistrationResponse:
-    with session_scope() as session:
-        if not payload.image_url:
-            raise HTTPException(status_code=400, detail="Player photo is required.")
-        if session.query(User).filter_by(username=payload.username).one_or_none() is not None:
-            raise HTTPException(status_code=409, detail="Username already exists.")
-        existing_player = (
-            session.query(Player)
-            .filter((Player.name_fa == payload.name_fa) | (Player.name_en == payload.name_en))
-            .one_or_none()
-        )
-        if existing_player is not None:
-            raise HTTPException(status_code=409, detail="Player name already exists.")
-
-        user = User(
-            username=payload.username,
-            password_hash=hash_password(payload.password),
-            preferred_language=payload.preferred_language,
-            is_admin=False,
-            is_active=True,
-            is_approved=False,
-        )
-        session.add(user)
-        session.flush()
-
-        player = Player(
-            display_name=payload.name_en,
-            name_fa=payload.name_fa,
-            name_en=payload.name_en,
-            role_type=payload.role_type,
-            appearance_score=payload.appearance_score,
-            image_url=payload.image_url,
-            is_active=True,
-            linked_user_id=user.id,
-        )
-        session.add(player)
-        session.flush()
-
-        return RegistrationResponse(
-            user=_serialize_user(user),
-            player=_serialize_player(player),
-            message="Registration submitted. Waiting for admin approval.",
         )
 
 

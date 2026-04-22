@@ -325,8 +325,6 @@ export function App() {
   const [userTab, setUserTab] = useState<"vote" | "rankings" | "account">("vote");
   const [adminTab, setAdminTab] = useState<"players" | "ratings" | "teams" | "comparisons">("players");
   const [loginError, setLoginError] = useState<string | null>(null);
-  const [registerError, setRegisterError] = useState<string | null>(null);
-  const [registerNotice, setRegisterNotice] = useState<string | null>(null);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [adminNotice, setAdminNotice] = useState<string | null>(null);
   const [comparisonQuestion, setComparisonQuestion] = useState<ComparisonQuestion | null>(null);
@@ -335,17 +333,6 @@ export function App() {
   const [comparisonSubmitting, setComparisonSubmitting] = useState<"answer" | "skip" | null>(null);
   const [comparisonNotice, setComparisonNotice] = useState<string | null>(null);
   const [loginForm, setLoginForm] = useState({ username: "", password: "" });
-  const [authMode, setAuthMode] = useState<"login" | "register">("login");
-  const [registerForm, setRegisterForm] = useState({
-    username: "",
-    password: "",
-    name_fa: "",
-    name_en: "",
-    role_type: "outfield",
-    appearance_score: 50,
-    preferred_language: "fa" as Language,
-    image_url: "",
-  });
   const [adminCreateForm, setAdminCreateForm] = useState({
     username: "",
     password: "",
@@ -705,38 +692,6 @@ export function App() {
     setLoginForm({ username: "", password: "" });
   }
 
-  async function handleRegister(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setRegisterError(null);
-    setRegisterNotice(null);
-    if (!registerForm.username || !registerForm.password || !registerForm.name_fa || !registerForm.name_en || !registerForm.role_type || !registerForm.image_url) {
-      setRegisterError(text.compareError);
-      return;
-    }
-    const response = await fetch(`${apiBaseUrl}/api/auth/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...registerForm, preferred_language: language }),
-    });
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { detail?: string } | null;
-      setRegisterError(payload?.detail ?? text.compareError);
-      return;
-    }
-    setRegisterNotice(text.registrationPending);
-    setRegisterForm({
-      username: "",
-      password: "",
-      name_fa: "",
-      name_en: "",
-      role_type: "outfield",
-      appearance_score: 50,
-      preferred_language: language,
-      image_url: "",
-    });
-    setAuthMode("login");
-  }
-
   async function handleAdminCreateUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!auth) return;
@@ -916,11 +871,17 @@ export function App() {
   }
 
   async function uploadPlayerImage(file: File): Promise<string> {
+    if (!auth) {
+      throw new Error(text.compareError);
+    }
     const image = await resizeImage(file);
     const formData = new FormData();
     formData.append("file", image, "player-photo.jpg");
     const response = await fetch(`${apiBaseUrl}/api/uploads/player-image`, {
       method: "POST",
+      headers: {
+        Authorization: `Bearer ${auth.token}`,
+      },
       body: formData,
     });
     const payload = (await response.json().catch(() => null)) as ImageUploadResponse | { detail?: string } | null;
@@ -941,20 +902,6 @@ export function App() {
       setAdminCreateForm((current) => ({ ...current, image_url: imageUrl }));
     } catch (error) {
       setAdminError(error instanceof Error ? error.message : text.compareError);
-    }
-  }
-
-  async function handleRegisterPhotoChange(file: File | null) {
-    if (!file) {
-      setRegisterForm((current) => ({ ...current, image_url: "" }));
-      return;
-    }
-    try {
-      setRegisterError(null);
-      const imageUrl = await uploadPlayerImage(file);
-      setRegisterForm((current) => ({ ...current, image_url: imageUrl }));
-    } catch (error) {
-      setRegisterError(error instanceof Error ? error.message : text.compareError);
     }
   }
 
@@ -1204,71 +1151,20 @@ export function App() {
             <p className="eyebrow">{text.appTitle}</p>
             {languageToggle()}
           </div>
-          <h1>{authMode === "login" ? text.login : text.register}</h1>
-          <p className="intro">{authMode === "login" ? text.loginIntro : text.registerIntro}</p>
-          {authMode === "login" ? (
-            <form className="stack" onSubmit={handleLogin}>
-              <label>
-                <span>{text.username}</span>
-                <input value={loginForm.username} onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} />
-              </label>
-              <label>
-                <span>{text.password}</span>
-                <input type="password" value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
-              </label>
-              <button type="submit">{text.login}</button>
-              {loginError ? <p className="error-text">{loginError}</p> : null}
-            </form>
-          ) : (
-            <form className="stack" onSubmit={handleRegister}>
-              <label>
-                <span>{text.username}</span>
-                <input required value={registerForm.username} onChange={(event) => setRegisterForm((current) => ({ ...current, username: event.target.value }))} />
-              </label>
-              <label>
-                <span>{text.password}</span>
-                <input required type="password" value={registerForm.password} onChange={(event) => setRegisterForm((current) => ({ ...current, password: event.target.value }))} />
-              </label>
-              <label>
-                <span>{text.nameFa}</span>
-                <input required value={registerForm.name_fa} onChange={(event) => setRegisterForm((current) => ({ ...current, name_fa: event.target.value }))} />
-              </label>
-              <label>
-                <span>{text.nameEn}</span>
-                <input required value={registerForm.name_en} onChange={(event) => setRegisterForm((current) => ({ ...current, name_en: event.target.value }))} />
-              </label>
-              <label>
-                <span>{text.playRole}</span>
-                <select required value={registerForm.role_type} onChange={(event) => setRegisterForm((current) => ({ ...current, role_type: event.target.value }))}>
-                  <option value="goalkeeper">{roleLabel("goalkeeper")}</option>
-                  <option value="hybrid">{roleLabel("hybrid")}</option>
-                  <option value="outfield">{roleLabel("outfield")}</option>
-                </select>
-              </label>
-              <label>
-                <span>{text.playerPhoto}</span>
-                <input required type="file" accept="image/*" onChange={(event) => void handleRegisterPhotoChange(event.target.files?.[0] ?? null)} />
-              </label>
-              {registerForm.image_url ? <img className="player-photo preview-photo" src={registerForm.image_url} alt="preview" /> : null}
-              <button type="submit">{text.register}</button>
-              {registerNotice ? <p className="success-text">{registerNotice}</p> : null}
-              {registerError ? <p className="error-text">{registerError}</p> : null}
-            </form>
-          )}
-          <div className="auth-switch">
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => {
-                setAuthMode((current) => (current === "login" ? "register" : "login"));
-                setLoginError(null);
-                setRegisterError(null);
-                setRegisterNotice(null);
-              }}
-            >
-              {authMode === "login" ? text.switchToRegister : text.switchToLogin}
-            </button>
-          </div>
+          <h1>{text.login}</h1>
+          <p className="intro">{text.loginIntro}</p>
+          <form className="stack" onSubmit={handleLogin}>
+            <label>
+              <span>{text.username}</span>
+              <input value={loginForm.username} onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))} />
+            </label>
+            <label>
+              <span>{text.password}</span>
+              <input type="password" value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} />
+            </label>
+            <button type="submit">{text.login}</button>
+            {loginError ? <p className="error-text">{loginError}</p> : null}
+          </form>
         </section>
       </main>
     );
