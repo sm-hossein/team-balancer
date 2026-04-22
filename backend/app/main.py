@@ -592,14 +592,6 @@ def deactivate_player(
             session.query(AuthToken).filter_by(user_id=linked_user_id).delete(synchronize_session=False)
 
 
-@app.get("/api/admin/bootstrap")
-def bootstrap_info() -> dict[str, str]:
-    return {
-        "admin_username": "admin",
-        "admin_password": "admin123",
-    }
-
-
 @app.get("/api/comparisons/next", response_model=ComparisonQuestionResponse | None)
 def get_next_comparison(current_user: User = Depends(_require_user)) -> ComparisonQuestionResponse | None:
     with session_scope() as session:
