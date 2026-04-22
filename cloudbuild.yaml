@@ -1,0 +1,15 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - backend/Dockerfile
+      - -t
+      - ${_IMAGE_URI}
+      - .
+
+images:
+  - ${_IMAGE_URI}
+
+substitutions:
+  _IMAGE_URI: us-west1-docker.pkg.dev/team-balancer-492107/team-balancer/team-balancer-api:latest
