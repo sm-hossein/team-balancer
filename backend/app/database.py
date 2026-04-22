@@ -55,10 +55,19 @@ def run_migrations() -> None:
     if "players" not in inspector.get_table_names():
         return
 
-    player_columns = {column["name"] for column in inspector.get_columns("players")}
+    player_column_details = inspector.get_columns("players")
+    player_columns = {column["name"] for column in player_column_details}
     if "image_url" not in player_columns:
         with engine.begin() as connection:
-            connection.execute(text("ALTER TABLE players ADD COLUMN image_url VARCHAR(500)"))
+            connection.execute(text("ALTER TABLE players ADD COLUMN image_url TEXT"))
+    elif engine.dialect.name == "postgresql":
+        image_url_column = next(
+            (column for column in player_column_details if column["name"] == "image_url"),
+            None,
+        )
+        if image_url_column and str(image_url_column["type"]).upper() != "TEXT":
+            with engine.begin() as connection:
+                connection.execute(text("ALTER TABLE players ALTER COLUMN image_url TYPE TEXT"))
     if "name_fa" not in player_columns:
         with engine.begin() as connection:
             connection.execute(text("ALTER TABLE players ADD COLUMN name_fa VARCHAR(100)"))

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .database import Base
@@ -35,7 +35,7 @@ class Player(Base):
     name_en: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     role_type: Mapped[str] = mapped_column(String(20), index=True)
     appearance_score: Mapped[float] = mapped_column(Float, default=0.0)
-    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     linked_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
