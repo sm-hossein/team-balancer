@@ -21,6 +21,7 @@ from .models import (
     User,
 )
 from .schemas import (
+    AdminPasswordResetRequest,
     AdminUserCreateResponse,
     AdminComparisonResponse,
     AuthResponse,
@@ -256,6 +257,23 @@ def create_user_account(
             user=_serialize_user(user),
             player=_serialize_player(player),
         )
+
+
+@app.put("/api/admin/users/{username}/password")
+def reset_user_password(
+    username: str,
+    payload: AdminPasswordResetRequest,
+    current_user: User = Depends(_require_admin),
+) -> dict[str, str]:
+    _ = current_user
+    with session_scope() as session:
+        user = session.query(User).filter_by(username=username).one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+
+        user.password_hash = hash_password(payload.new_password)
+        session.query(AuthToken).filter_by(user_id=user.id).delete(synchronize_session=False)
+        return {"status": "ok"}
 
 
 @app.post("/api/auth/login", response_model=AuthResponse)

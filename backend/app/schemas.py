@@ -22,6 +22,10 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=128)
 
 
+class AdminPasswordResetRequest(BaseModel):
+    new_password: str = Field(min_length=6, max_length=128)
+
+
 class AuthResponse(BaseModel):
     token: str
     user: dict
