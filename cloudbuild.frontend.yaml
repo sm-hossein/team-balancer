@@ -1,0 +1,18 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - frontend.Dockerfile
+      - --build-arg
+      - VITE_API_BASE_URL=${_API_URL}
+      - -t
+      - ${_IMAGE_URI}
+      - .
+
+images:
+  - ${_IMAGE_URI}
+
+substitutions:
+  _IMAGE_URI: us-west1-docker.pkg.dev/team-balancer-492107/team-balancer/team-balancer-web:latest
+  _API_URL: https://team-balancer-api-4335985321.us-west1.run.app
