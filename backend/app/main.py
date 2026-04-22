@@ -2,9 +2,11 @@ from contextlib import asynccontextmanager
 from itertools import combinations
 import os
 import random
+from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Header, HTTPException, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
+from google.cloud import storage
 
 from .database import Base, engine, run_migrations, session_scope
 from .models import (
@@ -41,6 +43,14 @@ from .ratings import compute_player_ratings
 from .security import create_token, hash_password, verify_password
 from .seed import seed_reference_data
 from .team_generation import generate_balanced_teams
+
+
+MAX_PLAYER_IMAGE_BYTES = 2 * 1024 * 1024
+PLAYER_IMAGE_CONTENT_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+}
 
 
 @asynccontextmanager
@@ -147,6 +157,30 @@ def _serialize_skill(session, skill: Skill) -> dict[str, object]:
 @app.get("/health")
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/uploads/player-image")
+async def upload_player_image(file: UploadFile = File(...)) -> dict[str, str]:
+    bucket_name = os.getenv("PLAYER_IMAGE_BUCKET")
+    if not bucket_name:
+        raise HTTPException(status_code=503, detail="Image storage is not configured.")
+
+    extension = PLAYER_IMAGE_CONTENT_TYPES.get(file.content_type or "")
+    if extension is None:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, or WebP images are allowed.")
+
+    data = await file.read(MAX_PLAYER_IMAGE_BYTES + 1)
+    if len(data) > MAX_PLAYER_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image must be 2 MB or smaller.")
+    if not data:
+        raise HTTPException(status_code=400, detail="Image file is empty.")
+
+    blob_name = f"player-images/{uuid4().hex}{extension}"
+    blob = storage.Client().bucket(bucket_name).blob(blob_name)
+    blob.cache_control = "public, max-age=31536000"
+    blob.upload_from_string(data, content_type=file.content_type)
+
+    return {"image_url": f"https://storage.googleapis.com/{bucket_name}/{blob_name}"}
 
 
 @app.get("/api/reference-data")

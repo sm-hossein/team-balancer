@@ -82,6 +82,10 @@ type ProgressStats = {
   completion_percent: number;
 };
 
+type ImageUploadResponse = {
+  image_url: string;
+};
+
 type AdminComparison = {
   id: number;
   created_at: string;
@@ -845,13 +849,64 @@ export function App() {
     await loadRatings(auth.token);
   }
 
-  async function readImageAsDataUrl(file: File): Promise<string> {
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(new Error("file-read-failed"));
-      reader.readAsDataURL(file);
+  async function resizeImage(file: File): Promise<Blob> {
+    if (!file.type.startsWith("image/")) {
+      throw new Error("Only image files are allowed.");
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.src = objectUrl;
+
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Could not read image file."));
     });
+
+    const maxSide = 800;
+    const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+    const width = Math.max(1, Math.round(image.width * scale));
+    const height = Math.max(1, Math.round(image.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      URL.revokeObjectURL(objectUrl);
+      throw new Error("Could not process image file.");
+    }
+
+    context.drawImage(image, 0, 0, width, height);
+    URL.revokeObjectURL(objectUrl);
+
+    return await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error("Could not process image file."));
+            return;
+          }
+          resolve(blob);
+        },
+        "image/jpeg",
+        0.82,
+      );
+    });
+  }
+
+  async function uploadPlayerImage(file: File): Promise<string> {
+    const image = await resizeImage(file);
+    const formData = new FormData();
+    formData.append("file", image, "player-photo.jpg");
+    const response = await fetch(`${apiBaseUrl}/api/uploads/player-image`, {
+      method: "POST",
+      body: formData,
+    });
+    const payload = (await response.json().catch(() => null)) as ImageUploadResponse | { detail?: string } | null;
+    if (!response.ok || !payload || !("image_url" in payload)) {
+      throw new Error(payload && "detail" in payload ? payload.detail ?? text.compareError : text.compareError);
+    }
+    return payload.image_url;
   }
 
   async function handleCreatePhotoChange(file: File | null) {
@@ -859,8 +914,13 @@ export function App() {
       setAdminCreateForm((current) => ({ ...current, image_url: "" }));
       return;
     }
-    const imageUrl = await readImageAsDataUrl(file);
-    setAdminCreateForm((current) => ({ ...current, image_url: imageUrl }));
+    try {
+      setAdminError(null);
+      const imageUrl = await uploadPlayerImage(file);
+      setAdminCreateForm((current) => ({ ...current, image_url: imageUrl }));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : text.compareError);
+    }
   }
 
   async function handleRegisterPhotoChange(file: File | null) {
@@ -868,8 +928,13 @@ export function App() {
       setRegisterForm((current) => ({ ...current, image_url: "" }));
       return;
     }
-    const imageUrl = await readImageAsDataUrl(file);
-    setRegisterForm((current) => ({ ...current, image_url: imageUrl }));
+    try {
+      setRegisterError(null);
+      const imageUrl = await uploadPlayerImage(file);
+      setRegisterForm((current) => ({ ...current, image_url: imageUrl }));
+    } catch (error) {
+      setRegisterError(error instanceof Error ? error.message : text.compareError);
+    }
   }
 
   async function handleEditPhotoChange(file: File | null) {
@@ -877,8 +942,13 @@ export function App() {
       setPlayerEditForm((current) => ({ ...current, image_url: "" }));
       return;
     }
-    const imageUrl = await readImageAsDataUrl(file);
-    setPlayerEditForm((current) => ({ ...current, image_url: imageUrl }));
+    try {
+      setAdminError(null);
+      const imageUrl = await uploadPlayerImage(file);
+      setPlayerEditForm((current) => ({ ...current, image_url: imageUrl }));
+    } catch (error) {
+      setAdminError(error instanceof Error ? error.message : text.compareError);
+    }
   }
 
   async function handleSelfPhotoChange(file: File | null) {
@@ -886,8 +956,13 @@ export function App() {
       setSelfProfileForm((current) => ({ ...current, image_url: "" }));
       return;
     }
-    const imageUrl = await readImageAsDataUrl(file);
-    setSelfProfileForm((current) => ({ ...current, image_url: imageUrl }));
+    try {
+      setProfileError(null);
+      const imageUrl = await uploadPlayerImage(file);
+      setSelfProfileForm((current) => ({ ...current, image_url: imageUrl }));
+    } catch (error) {
+      setProfileError(error instanceof Error ? error.message : text.compareError);
+    }
   }
 
   function handleLogout() {
