@@ -135,6 +135,13 @@ const translations = {
     editProfile: "ویرایش پروفایل",
     saveProfile: "ذخیره پروفایل",
     profileUpdated: "پروفایل به‌روز شد.",
+    changePassword: "تغییر رمز عبور",
+    currentPassword: "رمز عبور فعلی",
+    newPassword: "رمز عبور جدید",
+    confirmNewPassword: "تکرار رمز عبور جدید",
+    savePassword: "ذخیره رمز عبور",
+    passwordUpdated: "رمز عبور به‌روز شد.",
+    passwordMismatch: "رمز عبور جدید و تکرار آن یکسان نیستند.",
     detailedCard: "کارت بازیکن",
     skillBreakdown: "جزئیات مهارت‌ها",
     close: "بستن",
@@ -234,6 +241,13 @@ const translations = {
     editProfile: "Edit Profile",
     saveProfile: "Save Profile",
     profileUpdated: "Profile updated.",
+    changePassword: "Change Password",
+    currentPassword: "Current Password",
+    newPassword: "New Password",
+    confirmNewPassword: "Confirm New Password",
+    savePassword: "Save Password",
+    passwordUpdated: "Password updated.",
+    passwordMismatch: "The new password and confirmation do not match.",
     detailedCard: "Player Card",
     skillBreakdown: "Skill Breakdown",
     close: "Close",
@@ -352,6 +366,8 @@ export function App() {
   const [playerSearch, setPlayerSearch] = useState("");
   const [profileNotice, setProfileNotice] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [passwordNotice, setPasswordNotice] = useState<string | null>(null);
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [selectedPlayerCard, setSelectedPlayerCard] = useState<PlayerRating | null>(null);
   const [selfProfileForm, setSelfProfileForm] = useState({
     name_fa: "",
@@ -359,6 +375,11 @@ export function App() {
     role_type: "outfield",
     image_url: "",
     preferred_language: "fa" as Language,
+  });
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
   });
   const [playerEditForm, setPlayerEditForm] = useState({
     name_fa: "",
@@ -970,11 +991,16 @@ export function App() {
     setLoginError(null);
     setAdminError(null);
     setAdminNotice(null);
+    setProfileNotice(null);
+    setProfileError(null);
+    setPasswordNotice(null);
+    setPasswordError(null);
     setComparisonQuestion(null);
     setComparisonError(null);
     setComparisonNotice(null);
     setComparisonSubmitting(null);
     setLoginForm({ username: "", password: "" });
+    setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
   }
 
   async function handleComparisonAnswer(winnerPlayerId: number) {
@@ -1083,6 +1109,35 @@ export function App() {
     setAuth(nextAuth);
     setLanguage(nextAuth.user.preferred_language ?? "fa");
     setProfileNotice(translations[nextAuth.user.preferred_language ?? "fa"].profileUpdated);
+  }
+
+  async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!auth) return;
+    setPasswordError(null);
+    setPasswordNotice(null);
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setPasswordError(text.passwordMismatch);
+      return;
+    }
+    const response = await fetch(`${apiBaseUrl}/api/me/password`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${auth.token}`,
+      },
+      body: JSON.stringify({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      setPasswordError(data?.detail ?? text.compareError);
+      return;
+    }
+    setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+    setPasswordNotice(text.passwordUpdated);
   }
 
   function languageToggle(compact = false) {
@@ -1675,16 +1730,58 @@ export function App() {
                   {selfProfileForm.image_url ? <img className="player-photo preview-photo" src={selfProfileForm.image_url} alt="preview" /> : null}
                   <div className="account-actions">
                     <button type="submit">{text.saveProfile}</button>
-                    <button type="button" className="secondary-button" onClick={handleLogout}>{text.logout}</button>
                   </div>
                   {profileNotice ? <p className="success-text">{profileNotice}</p> : null}
                   {profileError ? <p className="error-text">{profileError}</p> : null}
                 </form>
               ) : (
-                <div className="account-actions">
-                  <button type="button" onClick={handleLogout}>{text.logout}</button>
-                </div>
+                <p className="session-text">{text.noLinkedPlayer}</p>
               )}
+              <form className="stack" onSubmit={handleChangePassword}>
+                <h3>{text.changePassword}</h3>
+                <label>
+                  <span>{text.currentPassword}</span>
+                  <input
+                    required
+                    type="password"
+                    minLength={6}
+                    maxLength={128}
+                    autoComplete="current-password"
+                    value={passwordForm.current_password}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, current_password: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>{text.newPassword}</span>
+                  <input
+                    required
+                    type="password"
+                    minLength={6}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={passwordForm.new_password}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, new_password: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>{text.confirmNewPassword}</span>
+                  <input
+                    required
+                    type="password"
+                    minLength={6}
+                    maxLength={128}
+                    autoComplete="new-password"
+                    value={passwordForm.confirm_password}
+                    onChange={(event) => setPasswordForm((current) => ({ ...current, confirm_password: event.target.value }))}
+                  />
+                </label>
+                <div className="account-actions">
+                  <button type="submit">{text.savePassword}</button>
+                  <button type="button" className="secondary-button" onClick={handleLogout}>{text.logout}</button>
+                </div>
+                {passwordNotice ? <p className="success-text">{passwordNotice}</p> : null}
+                {passwordError ? <p className="error-text">{passwordError}</p> : null}
+              </form>
             </section>
           ) : null}
         </>

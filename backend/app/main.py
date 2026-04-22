@@ -29,6 +29,7 @@ from .schemas import (
     ComparisonQuestionResponse,
     ComparisonSkipRequest,
     ComparisonSkipResponse,
+    PasswordChangeRequest,
     PlayerCreateRequest,
     PlayerResponse,
     PlayerUpdateRequest,
@@ -375,6 +376,34 @@ def update_me(
             user=_serialize_user(user),
             player=_serialize_player(player),
         )
+
+
+@app.put("/api/me/password")
+def change_password(
+    payload: PasswordChangeRequest,
+    authorization: str | None = Header(default=None),
+    current_user: User = Depends(_require_user),
+) -> dict[str, str]:
+    if authorization is None or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing bearer token.")
+    token_value = authorization.removeprefix("Bearer ").strip()
+
+    with session_scope() as session:
+        user = session.query(User).filter_by(id=current_user.id).one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="User not found.")
+        if not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        if payload.current_password == payload.new_password:
+            raise HTTPException(status_code=400, detail="New password must be different from the current password.")
+
+        user.password_hash = hash_password(payload.new_password)
+        session.query(AuthToken).filter(
+            AuthToken.user_id == user.id,
+            AuthToken.token != token_value,
+        ).delete(synchronize_session=False)
+
+    return {"message": "Password updated."}
 
 
 @app.get("/api/progress")
