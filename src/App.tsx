@@ -1364,7 +1364,7 @@ export function App() {
                   {filteredRankedPlayers.map((item, index) => (
                     <div className="skill-row" key={item.player.id}>
                       <span>{index + 1}. {playerName(item.player)}</span>
-                      <strong>{Math.round(item.overall_rating)}</strong>
+                      <strong>{displayCardScore(item.overall_rating)}</strong>
                     </div>
                   ))}
                 </div>
@@ -1448,12 +1448,12 @@ export function App() {
                         {generatedTeams.map((team) => (
                           <div className="team-card" key={team.team_index}>
                             <h3>Team {team.team_index}</h3>
-                            <p className="session-text">{text.overall}: {Math.round(team.metrics.overall)}</p>
-                            <p className="session-text">{text.goalkeeping}: {Math.round(team.metrics.goalkeeper)}</p>
+                            <p className="session-text">{text.overall}: {displayCardScore(team.metrics.overall)}</p>
+                            <p className="session-text">{text.goalkeeping}: {displayCardScore(team.metrics.goalkeeper)}</p>
                             <div className="category-grid">
                               {Object.entries(team.metrics.categories).map(([categoryKey, value]) => (
                                 <span className="category-pill" key={categoryKey}>
-                              {categoryLabel(categoryKey)} {Math.round(value)}
+                              {categoryLabel(categoryKey)} {displayCardScore(value)}
                             </span>
                           ))}
                         </div>
@@ -1461,7 +1461,7 @@ export function App() {
                           {team.players.map((item) => (
                             <div className="skill-row" key={item.player.id}>
                               <span>{playerName(item.player)}</span>
-                              <strong>{Math.round(item.overall_rating)}</strong>
+                              <strong>{displayCardScore(item.overall_rating)}</strong>
                             </div>
                           ))}
                         </div>
