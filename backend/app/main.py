@@ -668,9 +668,9 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
             for skip in skips
         ]
         recent_events.sort(key=lambda item: item[0], reverse=True)
-        for _, skill_id, _, _ in recent_events[:3]:
+        for _, skill_id, _, _ in recent_events[:5]:
             recent_skill_ids.append(skill_id)
-        for _, _, player_a_id, player_b_id in recent_events[:5]:
+        for _, _, player_a_id, player_b_id in recent_events[:8]:
             recent_player_ids.extend([player_a_id, player_b_id])
 
         player_exposure: dict[int, int] = {player.id: 0 for player in active_players}
@@ -720,17 +720,17 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                 exposure_gap = max(0, 8 - player_exposure.get(player_a.id, 0)) + max(
                     0, 8 - player_exposure.get(player_b.id, 0)
                 )
-                skill_familiarity_penalty = user_skill_counts.get(skill.id, 0) * 18
+                skill_familiarity_penalty = user_skill_counts.get(skill.id, 0) * 24
                 user_player_penalty = (
                     user_player_counts.get(player_a.id, 0) + user_player_counts.get(player_b.id, 0)
-                ) * 18
+                ) * 28
                 recent_skill_penalty = sum(
-                    100 // (position + 1)
+                    180 // (position + 1)
                     for position, recent_skill_id in enumerate(recent_skill_ids)
                     if recent_skill_id == skill.id
                 )
                 recent_player_penalty = sum(
-                    180 // (position + 1)
+                    260 // (position + 1)
                     for position, recent_player_id in enumerate(recent_player_ids)
                     if recent_player_id in {player_a.id, player_b.id}
                 )
@@ -744,7 +744,7 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                     - user_player_penalty
                     - recent_skill_penalty
                     - recent_player_penalty
-                    + random.uniform(0, 35)
+                    + random.uniform(0, 120)
                 )
 
                 candidate_pool.append(
@@ -761,12 +761,30 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
         if not candidate_pool:
             return None
 
+        freshest_candidates = [
+            candidate
+            for candidate in candidate_pool
+            if candidate[1].id not in set(recent_skill_ids[:2])
+            and candidate[2].id not in set(recent_player_ids[:6])
+            and candidate[3].id not in set(recent_player_ids[:6])
+        ]
+        if len(freshest_candidates) >= 8:
+            candidate_pool = freshest_candidates
+        else:
+            fresh_skill_candidates = [
+                candidate
+                for candidate in candidate_pool
+                if candidate[1].id not in set(recent_skill_ids[:2])
+            ]
+            if len(fresh_skill_candidates) >= 8:
+                candidate_pool = fresh_skill_candidates
+
         candidate_pool.sort(key=lambda item: item[0], reverse=True)
-        top_candidate_count = min(len(candidate_pool), max(15, min(50, len(candidate_pool) // 3)))
+        top_candidate_count = min(len(candidate_pool), max(25, min(100, len(candidate_pool) // 2)))
         top_skill_candidates = candidate_pool[:top_candidate_count]
         group_best_score = top_skill_candidates[0][0]
         candidate_weights = [
-            math.exp((candidate[0] - group_best_score) / 180)
+            math.exp((candidate[0] - group_best_score) / 320)
             for candidate in top_skill_candidates
         ]
         _, skill, player_a, player_b, answer_count, disagreement_count = random.choices(
