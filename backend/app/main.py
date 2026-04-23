@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from itertools import combinations
+import math
 import os
 import random
 from uuid import uuid4
@@ -657,25 +658,35 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
         for skip in skips:
             user_skill_counts[skip.skill_id] = user_skill_counts.get(skip.skill_id, 0) + 1
         recent_skill_ids: list[int] = []
+        recent_player_ids: list[int] = []
         recent_events = [
-            (comparison.created_at, comparison.skill_id)
+            (comparison.created_at, comparison.skill_id, comparison.player_a_id, comparison.player_b_id)
             for comparison in comparisons
             if comparison.evaluator_user_id == current_user.id
         ] + [
-            (skip.created_at, skip.skill_id)
+            (skip.created_at, skip.skill_id, skip.player_a_id, skip.player_b_id)
             for skip in skips
         ]
         recent_events.sort(key=lambda item: item[0], reverse=True)
-        for _, skill_id in recent_events[:2]:
+        for _, skill_id, _, _ in recent_events[:3]:
             recent_skill_ids.append(skill_id)
+        for _, _, player_a_id, player_b_id in recent_events[:5]:
+            recent_player_ids.extend([player_a_id, player_b_id])
 
         player_exposure: dict[int, int] = {player.id: 0 for player in active_players}
+        user_player_counts: dict[int, int] = {player.id: 0 for player in active_players}
         pair_stats: dict[tuple[int, int, int], list[Comparison]] = {}
         for comparison in comparisons:
             key = (comparison.skill_id, comparison.player_a_id, comparison.player_b_id)
             pair_stats.setdefault(key, []).append(comparison)
             player_exposure[comparison.player_a_id] = player_exposure.get(comparison.player_a_id, 0) + 1
             player_exposure[comparison.player_b_id] = player_exposure.get(comparison.player_b_id, 0) + 1
+            if comparison.evaluator_user_id == current_user.id:
+                user_player_counts[comparison.player_a_id] = user_player_counts.get(comparison.player_a_id, 0) + 1
+                user_player_counts[comparison.player_b_id] = user_player_counts.get(comparison.player_b_id, 0) + 1
+        for skip in skips:
+            user_player_counts[skip.player_a_id] = user_player_counts.get(skip.player_a_id, 0) + 1
+            user_player_counts[skip.player_b_id] = user_player_counts.get(skip.player_b_id, 0) + 1
 
         candidate_pool: list[tuple[float, Skill, Player, Player, int, int]] = []
 
@@ -710,6 +721,19 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                     0, 8 - player_exposure.get(player_b.id, 0)
                 )
                 skill_familiarity_penalty = user_skill_counts.get(skill.id, 0) * 18
+                user_player_penalty = (
+                    user_player_counts.get(player_a.id, 0) + user_player_counts.get(player_b.id, 0)
+                ) * 18
+                recent_skill_penalty = sum(
+                    100 // (position + 1)
+                    for position, recent_skill_id in enumerate(recent_skill_ids)
+                    if recent_skill_id == skill.id
+                )
+                recent_player_penalty = sum(
+                    180 // (position + 1)
+                    for position, recent_player_id in enumerate(recent_player_ids)
+                    if recent_player_id in {player_a.id, player_b.id}
+                )
                 score = (
                     skill.priority * 100
                     + appearance_signal * 2
@@ -717,6 +741,10 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                     - answer_count * 40
                     + disagreement_count * 25
                     - skill_familiarity_penalty
+                    - user_player_penalty
+                    - recent_skill_penalty
+                    - recent_player_penalty
+                    + random.uniform(0, 35)
                 )
 
                 candidate_pool.append(
@@ -733,42 +761,12 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
         if not candidate_pool:
             return None
 
-        candidates_by_skill: dict[int, list[tuple[float, Skill, Player, Player, int, int]]] = {}
-        for candidate in candidate_pool:
-            candidates_by_skill.setdefault(candidate[1].id, []).append(candidate)
-
-        min_seen_count = min(user_skill_counts.get(skill_id, 0) for skill_id in candidates_by_skill)
-        eligible_skill_groups = []
-        for skill_id, skill_candidates in candidates_by_skill.items():
-            seen_count = user_skill_counts.get(skill_id, 0)
-            if seen_count == min_seen_count:
-                skill_candidates.sort(key=lambda item: item[0], reverse=True)
-                eligible_skill_groups.append(skill_candidates)
-
-        if len(eligible_skill_groups) > 1 and recent_skill_ids:
-            filtered_skill_groups = [
-                skill_candidates
-                for skill_candidates in eligible_skill_groups
-                if skill_candidates[0][1].id != recent_skill_ids[0]
-            ]
-            if filtered_skill_groups:
-                eligible_skill_groups = filtered_skill_groups
-
-        if len(eligible_skill_groups) > 2 and len(recent_skill_ids) > 1:
-            filtered_skill_groups = [
-                skill_candidates
-                for skill_candidates in eligible_skill_groups
-                if skill_candidates[0][1].id != recent_skill_ids[1]
-            ]
-            if filtered_skill_groups:
-                eligible_skill_groups = filtered_skill_groups
-
-        chosen_skill_group = random.choice(eligible_skill_groups)
-
-        top_skill_candidates = chosen_skill_group[: min(6, len(chosen_skill_group))]
+        candidate_pool.sort(key=lambda item: item[0], reverse=True)
+        top_candidate_count = min(len(candidate_pool), max(15, min(50, len(candidate_pool) // 3)))
+        top_skill_candidates = candidate_pool[:top_candidate_count]
         group_best_score = top_skill_candidates[0][0]
         candidate_weights = [
-            1 / (group_best_score - candidate[0] + 1)
+            math.exp((candidate[0] - group_best_score) / 180)
             for candidate in top_skill_candidates
         ]
         _, skill, player_a, player_b, answer_count, disagreement_count = random.choices(
@@ -776,6 +774,8 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
             weights=candidate_weights,
             k=1,
         )[0]
+        if random.random() < 0.5:
+            player_a, player_b = player_b, player_a
         return ComparisonQuestionResponse(
             skill=_serialize_skill(session, skill),
             player_a=_serialize_player(player_a),
