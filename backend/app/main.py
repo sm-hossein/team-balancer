@@ -5,7 +5,7 @@ import os
 import random
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from google.cloud import storage
 
@@ -132,6 +132,14 @@ def _serialize_player(player: Player) -> dict[str, object]:
         "is_active": player.is_active,
         "linked_user_id": player.linked_user_id,
     }
+
+
+def _serialize_player_for_comparison_log(player: Player) -> dict[str, object]:
+    serialized = _serialize_player(player)
+    image_url = serialized.get("image_url")
+    if isinstance(image_url, str) and image_url.startswith("data:"):
+        serialized["image_url"] = None
+    return serialized
 
 
 def _serialize_skill(session, skill: Skill) -> dict[str, object]:
@@ -436,10 +444,18 @@ def get_ratings(current_user: User = Depends(_require_user)) -> dict[str, object
 
 
 @app.get("/api/admin/comparisons", response_model=list[AdminComparisonResponse])
-def list_admin_comparisons(current_user: User = Depends(_require_admin)) -> list[AdminComparisonResponse]:
+def list_admin_comparisons(
+    current_user: User = Depends(_require_admin),
+    limit: int = Query(default=250, ge=1, le=1000),
+) -> list[AdminComparisonResponse]:
     _ = current_user
     with session_scope() as session:
-        comparisons = session.query(Comparison).order_by(Comparison.created_at.desc(), Comparison.id.desc()).all()
+        comparisons = (
+            session.query(Comparison)
+            .order_by(Comparison.created_at.desc(), Comparison.id.desc())
+            .limit(limit)
+            .all()
+        )
         users = {user.id: user for user in session.query(User).all()}
         players = {player.id: player for player in session.query(Player).all()}
         skills = {skill.id: skill for skill in session.query(Skill).all()}
@@ -450,8 +466,8 @@ def list_admin_comparisons(current_user: User = Depends(_require_admin)) -> list
                 created_at=comparison.created_at.isoformat(),
                 evaluator_user=_serialize_user(users[comparison.evaluator_user_id]),
                 skill=_serialize_skill(session, skills[comparison.skill_id]),
-                player_a=_serialize_player(players[comparison.player_a_id]),
-                player_b=_serialize_player(players[comparison.player_b_id]),
+                player_a=_serialize_player_for_comparison_log(players[comparison.player_a_id]),
+                player_b=_serialize_player_for_comparison_log(players[comparison.player_b_id]),
                 winner_player_id=comparison.winner_player_id,
             )
             for comparison in comparisons
