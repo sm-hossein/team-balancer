@@ -667,28 +667,6 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
             (skip.skill_id, skip.player_a_id, skip.player_b_id)
             for skip in skips
         }
-        user_skill_counts: dict[int, int] = {}
-        for comparison in comparisons:
-            if comparison.evaluator_user_id == current_user.id:
-                user_skill_counts[comparison.skill_id] = user_skill_counts.get(comparison.skill_id, 0) + 1
-        for skip in skips:
-            user_skill_counts[skip.skill_id] = user_skill_counts.get(skip.skill_id, 0) + 1
-        recent_skill_ids: list[int] = []
-        recent_player_ids: list[int] = []
-        recent_events = [
-            (comparison.created_at, comparison.skill_id, comparison.player_a_id, comparison.player_b_id)
-            for comparison in comparisons
-            if comparison.evaluator_user_id == current_user.id
-        ] + [
-            (skip.created_at, skip.skill_id, skip.player_a_id, skip.player_b_id)
-            for skip in skips
-        ]
-        recent_events.sort(key=lambda item: item[0], reverse=True)
-        for _, skill_id, _, _ in recent_events[:5]:
-            recent_skill_ids.append(skill_id)
-        for _, _, player_a_id, player_b_id in recent_events[:8]:
-            recent_player_ids.extend([player_a_id, player_b_id])
-
         player_exposure: dict[int, int] = {player.id: 0 for player in active_players}
         user_player_counts: dict[int, int] = {player.id: 0 for player in active_players}
         pair_stats: dict[tuple[int, int, int], list[Comparison]] = {}
@@ -704,7 +682,28 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
             user_player_counts[skip.player_a_id] = user_player_counts.get(skip.player_a_id, 0) + 1
             user_player_counts[skip.player_b_id] = user_player_counts.get(skip.player_b_id, 0) + 1
 
-        candidate_pool: list[tuple[float, Skill, Player, Player, int, int]] = []
+        rating_payloads = compute_player_ratings(session, include_inactive=False)
+        skill_rating_by_key: dict[str, dict[int, float]] = {}
+        skill_count_by_key: dict[str, dict[int, int]] = {}
+        for payload in rating_payloads:
+            player_payload = payload.get("player", {})
+            player_id = player_payload.get("id") if isinstance(player_payload, dict) else None
+            if not isinstance(player_id, int):
+                continue
+            skill_ratings = payload.get("skill_ratings", {})
+            if not isinstance(skill_ratings, dict):
+                continue
+            for skill_key, skill_payload in skill_ratings.items():
+                if not isinstance(skill_key, str) or not isinstance(skill_payload, dict):
+                    continue
+                rating = skill_payload.get("rating")
+                comparisons_count = skill_payload.get("comparisons_count")
+                if isinstance(rating, (int, float)):
+                    skill_rating_by_key.setdefault(skill_key, {})[player_id] = float(rating)
+                if isinstance(comparisons_count, int):
+                    skill_count_by_key.setdefault(skill_key, {})[player_id] = comparisons_count
+
+        candidates_by_skill: dict[int, list[tuple[float, Skill, Player, Player, int, int]]] = {}
 
         for skill in skills:
             eligible_players = [
@@ -732,40 +731,43 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                 if winner_counts:
                     disagreement_count = answer_count - max(winner_counts.values())
 
-                appearance_signal = player_a.appearance_score + player_b.appearance_score
-                exposure_gap = max(0, 8 - player_exposure.get(player_a.id, 0)) + max(
+                skill_ratings = skill_rating_by_key.get(skill.key, {})
+                rating_gap = abs(skill_ratings.get(player_a.id, 50.0) - skill_ratings.get(player_b.id, 50.0))
+                closeness_weight = 0.7 + 0.8 * math.exp(-rating_gap / 22)
+
+                skill_counts = skill_count_by_key.get(skill.key, {})
+                skill_need = max(0, 8 - skill_counts.get(player_a.id, 0)) + max(
+                    0, 8 - skill_counts.get(player_b.id, 0)
+                )
+                skill_need_weight = 1 + min(skill_need / 16, 1) * 0.75
+
+                exposure_need = max(0, 8 - player_exposure.get(player_a.id, 0)) + max(
                     0, 8 - player_exposure.get(player_b.id, 0)
                 )
-                skill_familiarity_penalty = user_skill_counts.get(skill.id, 0) * 24
-                user_player_penalty = (
-                    user_player_counts.get(player_a.id, 0) + user_player_counts.get(player_b.id, 0)
-                ) * 28
-                recent_skill_penalty = sum(
-                    180 // (position + 1)
-                    for position, recent_skill_id in enumerate(recent_skill_ids)
-                    if recent_skill_id == skill.id
+                exposure_weight = 1 + min(exposure_need / 16, 1) * 0.25
+                answer_weight = 1 / (1 + answer_count * 0.35)
+                disagreement_weight = 1 + min(disagreement_count, 3) * 0.12
+                user_repeat_weight = 1 / (
+                    1
+                    + (
+                        user_player_counts.get(player_a.id, 0)
+                        + user_player_counts.get(player_b.id, 0)
+                    )
+                    * 0.08
                 )
-                recent_player_penalty = sum(
-                    260 // (position + 1)
-                    for position, recent_player_id in enumerate(recent_player_ids)
-                    if recent_player_id in {player_a.id, player_b.id}
-                )
-                score = (
-                    skill.priority * 100
-                    + appearance_signal * 2
-                    + exposure_gap * 12
-                    - answer_count * 40
-                    + disagreement_count * 25
-                    - skill_familiarity_penalty
-                    - user_player_penalty
-                    - recent_skill_penalty
-                    - recent_player_penalty
-                    + random.uniform(0, 120)
+                pair_weight = (
+                    closeness_weight
+                    * skill_need_weight
+                    * exposure_weight
+                    * answer_weight
+                    * disagreement_weight
+                    * user_repeat_weight
+                    * random.uniform(0.85, 1.15)
                 )
 
-                candidate_pool.append(
+                candidates_by_skill.setdefault(skill.id, []).append(
                     (
-                        score,
+                        pair_weight,
                         skill,
                         player_a,
                         player_b,
@@ -774,38 +776,14 @@ def get_next_comparison(current_user: User = Depends(_require_user)) -> Comparis
                     )
                 )
 
-        if not candidate_pool:
+        if not candidates_by_skill:
             return None
 
-        freshest_candidates = [
-            candidate
-            for candidate in candidate_pool
-            if candidate[1].id not in set(recent_skill_ids[:2])
-            and candidate[2].id not in set(recent_player_ids[:6])
-            and candidate[3].id not in set(recent_player_ids[:6])
-        ]
-        if len(freshest_candidates) >= 8:
-            candidate_pool = freshest_candidates
-        else:
-            fresh_skill_candidates = [
-                candidate
-                for candidate in candidate_pool
-                if candidate[1].id not in set(recent_skill_ids[:2])
-            ]
-            if len(fresh_skill_candidates) >= 8:
-                candidate_pool = fresh_skill_candidates
-
-        candidate_pool.sort(key=lambda item: item[0], reverse=True)
-        top_candidate_count = min(len(candidate_pool), max(25, min(100, len(candidate_pool) // 2)))
-        top_skill_candidates = candidate_pool[:top_candidate_count]
-        group_best_score = top_skill_candidates[0][0]
-        candidate_weights = [
-            math.exp((candidate[0] - group_best_score) / 320)
-            for candidate in top_skill_candidates
-        ]
+        selected_skill_id = random.choice(list(candidates_by_skill))
+        skill_candidates = candidates_by_skill[selected_skill_id]
         _, skill, player_a, player_b, answer_count, disagreement_count = random.choices(
-            top_skill_candidates,
-            weights=candidate_weights,
+            skill_candidates,
+            weights=[candidate[0] for candidate in skill_candidates],
             k=1,
         )[0]
         if random.random() < 0.5:
